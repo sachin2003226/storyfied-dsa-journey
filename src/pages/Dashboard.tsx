@@ -8,6 +8,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { BookOpen, Clock, Trophy, Star } from 'lucide-react';
 import { Tables } from '@/integrations/supabase/types';
+import { toast } from '@/hooks/use-toast';
 
 type Topic = Tables<'topics'>;
 type Lesson = Tables<'lessons'>;
@@ -25,15 +26,28 @@ const Dashboard = () => {
 
   const fetchDashboardData = async () => {
     try {
+      console.log('Fetching dashboard data...');
+      
       // Fetch topics
-      const { data: topicsData } = await supabase
+      const { data: topicsData, error: topicsError } = await supabase
         .from('topics')
         .select('*')
         .eq('is_active', true)
         .order('order_index');
 
+      console.log('Topics query result:', { topicsData, topicsError });
+
+      if (topicsError) {
+        console.error('Error fetching topics:', topicsError);
+        toast({
+          title: "Error loading topics",
+          description: topicsError.message,
+          variant: "destructive"
+        });
+      }
+
       // Fetch recent lessons with topics
-      const { data: lessonsData } = await supabase
+      const { data: lessonsData, error: lessonsError } = await supabase
         .from('lessons')
         .select(`
           *,
@@ -43,16 +57,33 @@ const Dashboard = () => {
         .order('created_at', { ascending: false })
         .limit(4);
 
+      console.log('Lessons query result:', { lessonsData, lessonsError });
+
+      if (lessonsError) {
+        console.error('Error fetching lessons:', lessonsError);
+      }
+
       // Fetch user progress
-      const { data: progressData } = await supabase
+      const { data: progressData, error: progressError } = await supabase
         .from('user_progress')
         .select('*');
+
+      console.log('Progress query result:', { progressData, progressError });
+
+      if (progressError) {
+        console.error('Error fetching progress:', progressError);
+      }
 
       setTopics(topicsData || []);
       setRecentLessons(lessonsData || []);
       setProgress(progressData || []);
     } catch (error) {
       console.error('Error fetching dashboard data:', error);
+      toast({
+        title: "Error loading dashboard",
+        description: "Please try refreshing the page",
+        variant: "destructive"
+      });
     } finally {
       setLoading(false);
     }
@@ -137,20 +168,35 @@ const Dashboard = () => {
               <CardDescription>Your progress across different DSA topics</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-              {topics.map((topic) => (
-                <div key={topic.id} className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center space-x-2">
-                      <span className="text-lg">{topic.icon}</span>
-                      <span className="font-medium">{topic.name}</span>
+              {topics.length > 0 ? (
+                topics.map((topic) => (
+                  <div key={topic.id} className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center space-x-2">
+                        <span className="text-lg">{topic.icon || '📚'}</span>
+                        <span className="font-medium">{topic.name}</span>
+                      </div>
+                      <span className="text-sm text-gray-500">
+                        {getTopicProgress(topic.id)}%
+                      </span>
                     </div>
-                    <span className="text-sm text-gray-500">
-                      {getTopicProgress(topic.id)}%
-                    </span>
+                    <Progress value={getTopicProgress(topic.id)} className="h-2" />
                   </div>
-                  <Progress value={getTopicProgress(topic.id)} className="h-2" />
+                ))
+              ) : (
+                <div className="text-center py-8">
+                  <BookOpen className="h-12 w-12 text-gray-400 mx-auto mb-4" />
+                  <h3 className="text-lg font-medium text-gray-900 mb-2">No topics found</h3>
+                  <p className="text-gray-600">Topics will appear here once they are added to the system.</p>
+                  <Button 
+                    onClick={fetchDashboardData} 
+                    variant="outline" 
+                    className="mt-4"
+                  >
+                    Refresh
+                  </Button>
                 </div>
-              ))}
+              )}
             </CardContent>
           </Card>
 
@@ -161,37 +207,45 @@ const Dashboard = () => {
               <CardDescription>Continue your learning journey</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-              {recentLessons.map((lesson) => (
-                <div key={lesson.id} className="flex items-center justify-between p-4 border rounded-lg">
-                  <div className="space-y-1">
-                    <h4 className="font-medium">{lesson.title}</h4>
-                    <div className="flex items-center space-x-2">
-                      <Badge variant="secondary">{lesson.topic.name}</Badge>
-                      <Badge 
-                        variant={lesson.difficulty === 'easy' ? 'default' : 
-                                lesson.difficulty === 'medium' ? 'secondary' : 'destructive'}
-                      >
-                        {lesson.difficulty}
-                      </Badge>
-                      {lesson.is_premium && (
-                        <Badge variant="outline">
-                          <Star className="h-3 w-3 mr-1" />
-                          Premium
+              {recentLessons.length > 0 ? (
+                recentLessons.map((lesson) => (
+                  <div key={lesson.id} className="flex items-center justify-between p-4 border rounded-lg">
+                    <div className="space-y-1">
+                      <h4 className="font-medium">{lesson.title}</h4>
+                      <div className="flex items-center space-x-2">
+                        <Badge variant="secondary">{lesson.topic?.name || 'Unknown Topic'}</Badge>
+                        <Badge 
+                          variant={lesson.difficulty === 'easy' ? 'default' : 
+                                  lesson.difficulty === 'medium' ? 'secondary' : 'destructive'}
+                        >
+                          {lesson.difficulty}
                         </Badge>
-                      )}
+                        {lesson.is_premium && (
+                          <Badge variant="outline">
+                            <Star className="h-3 w-3 mr-1" />
+                            Premium
+                          </Badge>
+                        )}
+                      </div>
+                      <p className="text-sm text-gray-600">
+                        {lesson.duration_minutes} minutes
+                      </p>
                     </div>
-                    <p className="text-sm text-gray-600">
-                      {lesson.duration_minutes} minutes
-                    </p>
+                    <Link to={`/lesson/${lesson.id}`}>
+                      <Button size="sm">
+                        {progress.some(p => p.lesson_id === lesson.id && p.completed) 
+                          ? 'Review' : 'Start'}
+                      </Button>
+                    </Link>
                   </div>
-                  <Link to={`/lesson/${lesson.id}`}>
-                    <Button size="sm">
-                      {progress.some(p => p.lesson_id === lesson.id && p.completed) 
-                        ? 'Review' : 'Start'}
-                    </Button>
-                  </Link>
+                ))
+              ) : (
+                <div className="text-center py-8">
+                  <BookOpen className="h-12 w-12 text-gray-400 mx-auto mb-4" />
+                  <h3 className="text-lg font-medium text-gray-900 mb-2">No lessons found</h3>
+                  <p className="text-gray-600">Lessons will appear here once topics and lessons are added.</p>
                 </div>
-              ))}
+              )}
             </CardContent>
           </Card>
         </div>
@@ -199,32 +253,45 @@ const Dashboard = () => {
         {/* Topics Grid */}
         <div className="mt-8">
           <h2 className="text-2xl font-bold text-gray-900 mb-6">All Topics</h2>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {topics.map((topic) => (
-              <Link key={topic.id} to={`/topic/${topic.id}`}>
-                <Card className="hover:shadow-lg transition-shadow cursor-pointer">
-                  <CardHeader>
-                    <div className="flex items-center space-x-3">
-                      <span className="text-2xl">{topic.icon}</span>
-                      <div>
-                        <CardTitle className="text-lg">{topic.name}</CardTitle>
-                        <CardDescription>{topic.description}</CardDescription>
+          {topics.length > 0 ? (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              {topics.map((topic) => (
+                <Link key={topic.id} to={`/topic/${topic.id}`}>
+                  <Card className="hover:shadow-lg transition-shadow cursor-pointer">
+                    <CardHeader>
+                      <div className="flex items-center space-x-3">
+                        <span className="text-2xl">{topic.icon || '📚'}</span>
+                        <div>
+                          <CardTitle className="text-lg">{topic.name}</CardTitle>
+                          <CardDescription>{topic.description}</CardDescription>
+                        </div>
                       </div>
-                    </div>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="space-y-2">
-                      <div className="flex justify-between text-sm">
-                        <span>Progress</span>
-                        <span>{getTopicProgress(topic.id)}%</span>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="space-y-2">
+                        <div className="flex justify-between text-sm">
+                          <span>Progress</span>
+                          <span>{getTopicProgress(topic.id)}%</span>
+                        </div>
+                        <Progress value={getTopicProgress(topic.id)} className="h-2" />
                       </div>
-                      <Progress value={getTopicProgress(topic.id)} className="h-2" />
-                    </div>
-                  </CardContent>
-                </Card>
-              </Link>
-            ))}
-          </div>
+                    </CardContent>
+                  </Card>
+                </Link>
+              ))}
+            </div>
+          ) : (
+            <Card>
+              <CardContent className="text-center py-12">
+                <BookOpen className="h-12 w-12 text-gray-400 mx-auto mb-4" />
+                <h3 className="text-lg font-medium text-gray-900 mb-2">No topics available</h3>
+                <p className="text-gray-600 mb-4">Topics need to be added to the system before they can be displayed here.</p>
+                <Button onClick={fetchDashboardData} variant="outline">
+                  Refresh Dashboard
+                </Button>
+              </CardContent>
+            </Card>
+          )}
         </div>
       </div>
     </div>
